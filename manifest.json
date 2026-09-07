@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ef-code.wallpaper-explorer",
+  "name": "Wallpaper Explorer",
+  "version": "0.1.0",
+  "author": "EF-Code",
+  "license": "MIT",
+  "description": "Browse and apply wallpapers from any installed Omarchy theme without changing theme colors.",
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "WallpaperExplorer.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Wallpaper Explorer",
+    "description": "Browse wallpapers from every installed Omarchy theme.",
+    "category": "Appearance",
+    "allowMultiple": false,
+    "defaultSection": "left"
+  }
+}
