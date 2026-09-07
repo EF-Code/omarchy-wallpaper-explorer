@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$repo_root"
+
+echo "== manifest validation =="
+omarchy plugin validate .
+
+echo "== model tests =="
+node tests/model.test.js
+
+echo "== apply test =="
+bash tests/apply.test.sh
+
+echo "== shell syntax =="
+bash -n discover.sh apply.sh
+
+echo "== discovery smoke test =="
+discovery_output=$(./discover.sh)
+grep -q $'^meta\tcurrent-theme\t' <<< "$discovery_output"
+grep -q $'^theme\t' <<< "$discovery_output"
+grep -q $'^background\t' <<< "$discovery_output"
+
+echo "all checks passed"
