@@ -30,9 +30,18 @@ Item {
   property int themeIndex: 0
   property int backgroundIndex: 0
   property int requestSerial: 0
+  property string discoveryOutput: ""
+  property bool discoveryOutputReady: false
+  property int discoveryExitCode: -1
   property string applyOutput: ""
   property bool applyOutputReady: false
+  property string applyErrorOutput: ""
+  property bool applyErrorOutputReady: false
   property int applyExitCode: -1
+  property int sessionSerial: 0
+  property int activeApplySession: -1
+  property string activeApplyThemeName: ""
+  property int successSession: -1
 
   readonly property var filteredThemes: Model.filterThemes(root.themes, root.searchText)
   readonly property string pluginId: "io.github.ef-code.wallpaper-explorer"
@@ -57,6 +66,8 @@ Item {
   }
 
   function open(payloadJson) {
+    successTimer.stop()
+    root.sessionSerial += 1
     root.opened = true
     root.view = "themes"
     root.searchText = ""
@@ -66,17 +77,18 @@ Item {
     root.backgroundIndex = 0
     root.statusMessage = ""
     root.statusError = false
-    root.refresh()
+    if (root.themes.length === 0 && !root.loading) root.refresh()
     Qt.callLater(function() { focusScope.forceActiveFocus() })
   }
 
   function close() {
+    successTimer.stop()
     root.opened = false
-    root.applying = false
   }
 
   function dismiss() {
     if (!root.opened) return
+    successTimer.stop()
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
       root.shell.hide(root.pluginId)
@@ -91,17 +103,37 @@ Item {
     if (!root.discoveryScript || root.loading) return
 
     root.loading = true
-    root.statusMessage = "Scanning installed themes…"
+    root.statusMessage = root.themes.length === 0 ? "Loading installed themes…" : ""
     root.statusError = false
     root.requestSerial += 1
+    root.discoveryOutput = ""
+    root.discoveryOutputReady = false
+    root.discoveryExitCode = -1
     discoveryProc.command = ["bash", root.discoveryScript]
     discoveryProc.running = true
+  }
+
+  function finishDiscoveryWhenReady() {
+    if (root.discoveryExitCode < 0 || !root.discoveryOutputReady) return
+    var exitCode = root.discoveryExitCode
+    var output = root.discoveryOutput
+    var serial = root.requestSerial
+    root.discoveryExitCode = -1
+    root.discoveryOutputReady = false
+    root.loading = false
+    if (exitCode !== 0) {
+      root.statusError = true
+      root.statusMessage = "Could not scan installed themes."
+      return
+    }
+    root.loadDiscovery(output, serial)
   }
 
   function loadDiscovery(raw, serial) {
     if (serial !== root.requestSerial) return
 
     var parsed = Model.parseRows(raw)
+    root.loading = false
     root.themes = parsed.themes
     root.currentThemeSlug = parsed.currentTheme
     root.currentBackgroundPath = parsed.currentBackground
@@ -194,17 +226,24 @@ Item {
     root.statusError = false
     root.applyOutput = ""
     root.applyOutputReady = false
+    root.applyErrorOutput = ""
+    root.applyErrorOutputReady = false
     root.applyExitCode = -1
+    root.activeApplySession = root.sessionSerial
+    root.activeApplyThemeName = root.selectedTheme.name
     applyProc.command = ["bash", root.applyScript,
-      root.selectedBackground.path, root.selectedTheme.slug]
+      root.selectedBackground.path, root.selectedTheme.slug,
+      root.selectedBackground.fingerprint]
     applyProc.running = true
   }
 
-  function finishApply(raw, exitCode) {
+  function finishApply(raw, exitCode, applySession, themeName) {
     root.applying = false
+    if (!root.opened || applySession !== root.sessionSerial) return
     if (exitCode !== 0) {
       root.statusError = true
-      root.statusMessage = "Wallpaper could not be applied."
+      var detail = String(root.applyErrorOutput || "").trim().split("\n")[0]
+      root.statusMessage = detail || "Wallpaper could not be applied."
       return
     }
 
@@ -212,21 +251,30 @@ Item {
     var lines = String(raw || "").split("\n")
     for (var i = 0; i < lines.length; i++) {
       var fields = lines[i].split("\t")
-      if (fields[0] === "applied") appliedPath = fields.slice(1).join("\t")
+      if (fields.length === 2 && fields[0] === "applied"
+          && fields[1].charAt(0) === "/") appliedPath = fields[1]
     }
-    if (appliedPath) root.currentBackgroundPath = appliedPath
+    if (!appliedPath) {
+      root.statusError = true
+      root.statusMessage = "Wallpaper apply returned an invalid result."
+      return
+    }
+    root.currentBackgroundPath = appliedPath
     root.statusError = false
-    root.statusMessage = "Applied from " + root.selectedTheme.name
+    root.statusMessage = "Applied from " + themeName
+    root.successSession = applySession
     successTimer.restart()
   }
 
   function finishApplyWhenReady() {
-    if (root.applyExitCode < 0 || !root.applyOutputReady) return
+    if (root.applyExitCode < 0 || !root.applyOutputReady || !root.applyErrorOutputReady) return
     var exitCode = root.applyExitCode
     var output = root.applyOutput
+    var applySession = root.activeApplySession
+    var themeName = root.activeApplyThemeName
     root.applyExitCode = -1
     root.applyOutputReady = false
-    root.finishApply(output, exitCode)
+    root.finishApply(output, exitCode, applySession, themeName)
   }
 
   function handleKey(event) {
@@ -271,30 +319,41 @@ Item {
   Process {
     id: discoveryProc
     stdout: StdioCollector {
+      id: discoveryStdout
       waitForEnd: true
-      onStreamFinished: root.loadDiscovery(text, root.requestSerial)
+      onStreamFinished: {
+        root.discoveryOutput = String(discoveryStdout.text || "")
+        root.discoveryOutputReady = true
+        root.finishDiscoveryWhenReady()
+      }
     }
     stderr: StdioCollector { id: discoveryStderr; waitForEnd: true }
     onExited: function(exitCode) {
-      root.loading = false
-      if (exitCode !== 0) {
-        root.statusError = true
-        root.statusMessage = "Could not scan installed themes."
-      }
+      root.discoveryExitCode = exitCode
+      root.finishDiscoveryWhenReady()
     }
   }
 
   Process {
     id: applyProc
     stdout: StdioCollector {
+      id: applyStdout
       waitForEnd: true
       onStreamFinished: {
-        root.applyOutput = String(text || "")
+        root.applyOutput = String(applyStdout.text || "")
         root.applyOutputReady = true
         root.finishApplyWhenReady()
       }
     }
-    stderr: StdioCollector { id: applyStderr; waitForEnd: true }
+    stderr: StdioCollector {
+      id: applyStderr
+      waitForEnd: true
+      onStreamFinished: {
+        root.applyErrorOutput = String(applyStderr.text || "")
+        root.applyErrorOutputReady = true
+        root.finishApplyWhenReady()
+      }
+    }
     onExited: function(exitCode) {
       root.applyExitCode = exitCode
       root.finishApplyWhenReady()
@@ -305,7 +364,10 @@ Item {
     id: successTimer
     interval: 900
     repeat: false
-    onTriggered: root.dismiss()
+    onTriggered: {
+      if (root.opened && root.successSession === root.sessionSerial)
+        root.dismiss()
+    }
   }
 
   PanelWindow {
@@ -341,7 +403,7 @@ Item {
 
         MouseArea {
           anchors.fill: parent
-          onClicked: mouse.accepted = true
+          onClicked: function(mouse) { mouse.accepted = true }
         }
 
         FocusScope {
@@ -394,7 +456,7 @@ Item {
               }
 
               Button {
-                text: "Refresh"
+                text: root.loading ? "Refreshing…" : "Refresh"
                 focusable: true
                 enabled: !root.loading && !root.applying
                 onClicked: root.refresh()
@@ -550,11 +612,11 @@ Item {
                   Column {
                     anchors.centerIn: parent
                     spacing: Style.space(6)
-                    visible: root.loading || root.filteredThemes.length === 0
+                    visible: !root.loading && root.filteredThemes.length === 0
 
                     Text {
                       anchors.horizontalCenter: parent.horizontalCenter
-                      text: root.loading ? "Scanning installed themes…" : "No matching themes"
+                      text: "No matching themes"
                       color: root.foreground
                       font.family: Style.font.family
                       font.pixelSize: Style.font.body
@@ -563,7 +625,7 @@ Item {
 
                     Text {
                       anchors.horizontalCenter: parent.horizontalCenter
-                      text: root.loading ? "" : "Try a different search term."
+                      text: "Try a different search term."
                       color: root.mutedForeground
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
@@ -594,7 +656,9 @@ Item {
                       anchors.margins: Style.space(6)
                       radius: Style.space(12)
                       color: root.backgroundIndex === index
-                        ? Qt.alpha(root.accent, 0.18) : root.surfaceRaised
+                        ? Qt.alpha(root.accent, 0.18)
+                        : backgroundMouse.containsMouse
+                          ? Qt.alpha(root.accent, 0.08) : root.surfaceRaised
                       border.width: root.backgroundIndex === index ? 2 : 1
                       border.color: root.backgroundIndex === index
                         ? root.accent : Qt.alpha(root.foreground, 0.10)
@@ -635,9 +699,10 @@ Item {
                       }
 
                       MouseArea {
+                        id: backgroundMouse
                         anchors.fill: parent
                         hoverEnabled: true
-                        onEntered: root.setBackgroundIndex(index)
+                        cursorShape: Qt.PointingHandCursor
                         onClicked: root.setBackgroundIndex(index)
                       }
                     }
