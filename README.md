@@ -4,16 +4,32 @@ Wallpaper Explorer is a native Omarchy shell plugin for browsing and applying
 wallpapers from every installed Omarchy theme without changing the active theme
 colors.
 
-## Current status
+It does not download or install themes or wallpapers. The gallery is built only
+from themes already installed for the current user.
 
-The project currently contains the first working slice:
+## Features
 
-- a `bar-widget` entry point for opening the explorer;
-- a fullscreen Quickshell gallery overlay;
-- discovery of stock themes and user theme overlays;
-- theme-level previews and wallpaper grids;
-- persistence-safe application through `omarchy theme bg set`;
-- model, shell, and manifest checks.
+- Fullscreen, keyboard-friendly Quickshell gallery
+- Theme cards with wallpaper previews and searchable names
+- Stock themes, user theme overlays, and user-added backgrounds for installed themes
+- Wallpaper-only application through `omarchy theme bg set`
+- Active theme colors remain unchanged
+- Plugin-owned applied copies stay out of Omarchy's regular background picker
+- Bounded scanning, preview conversion, cache storage, and applied state
+
+## Install
+
+```bash
+omarchy plugin add https://github.com/EF-Code/omarchy-wallpaper-explorer.git --enable
+```
+
+Open Wallpaper Explorer from its bar widget. Select an installed theme, choose
+one of its wallpapers, then press **Apply**.
+
+WebP previews require `vipsthumbnail`, which Omarchy normally provides. When
+Omarchy's desktop renderer cannot decode a selected WebP, GIF, or BMP directly,
+Wallpaper Explorer converts its plugin-owned copy to a full-resolution JPEG
+before applying it. Installed theme files remain untouched.
 
 ## Development install
 
@@ -33,6 +49,19 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable io.github.ef-code.wallpaper-explorer
 ```
 
-The plugin copies a selected wallpaper into its XDG state directory before
-applying it. This keeps the choice available across shell restarts without
-adding plugin-applied wallpapers to Omarchy's regular theme background picker.
+The plugin copies a selected wallpaper into
+`$XDG_STATE_HOME/omarchy/wallpaper-explorer` (or `~/.local/state` when
+`XDG_STATE_HOME` is unset) before applying it. Generated WebP previews live in
+`$XDG_CACHE_HOME/wallpaper-explorer` (or `~/.cache`). It never writes to
+`/usr/share/omarchy`.
+
+## Security
+
+Only regular image files contained by an installed theme's wallpaper directory
+are accepted. Nested symlink escapes, stale selections, oversized files, and
+malformed discovery records are rejected. See [SECURITY.md](SECURITY.md) for
+private reporting instructions.
+
+## License
+
+MIT
