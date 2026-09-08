@@ -14,8 +14,16 @@ node tests/model.test.js
 echo "== apply test =="
 bash tests/apply.test.sh
 
+echo "== discovery tests =="
+bash tests/discover.test.sh
+
 echo "== shell syntax =="
 bash -n discover.sh apply.sh
+
+if command -v shellcheck >/dev/null 2>&1; then
+  echo "== shellcheck =="
+  shellcheck discover.sh apply.sh tests/*.sh scripts/check
+fi
 
 echo "== discovery smoke test =="
 discovery_output=$(./discover.sh)

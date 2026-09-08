@@ -5,14 +5,20 @@ function titleForSlug(slug) {
 }
 
 function parseRows(raw) {
+  var maximumThemes = 256
+  var maximumBackgroundsPerTheme = 256
+  var maximumBackgroundsTotal = 2048
   var themes = []
-  var bySlug = {}
+  var bySlug = Object.create(null)
   var currentTheme = ""
   var currentBackground = ""
+  var backgroundTotal = 0
   var lines = String(raw || "").split("\n")
 
   function ensureTheme(slug, name, count, preview) {
-    if (!bySlug[slug]) {
+    if (!/^[a-z0-9]+(?:[a-z0-9-]*[a-z0-9])?$/.test(slug)) return null
+    if (!Object.prototype.hasOwnProperty.call(bySlug, slug)) {
+      if (themes.length >= maximumThemes) return null
       bySlug[slug] = {
         slug: slug,
         name: name || titleForSlug(slug),
@@ -21,8 +27,20 @@ function parseRows(raw) {
         backgrounds: []
       }
       themes.push(bySlug[slug])
+    } else if (name !== undefined) {
+      bySlug[slug].name = name || titleForSlug(slug)
+      bySlug[slug].count = Math.min(maximumBackgroundsPerTheme, Math.max(0, Number(count) || 0))
+      bySlug[slug].preview = preview || ""
     }
     return bySlug[slug]
+  }
+
+  function validField(value) {
+    return typeof value === "string" && !/[\t\r\n]/.test(value)
+  }
+
+  function validPath(value) {
+    return validField(value) && value.charAt(0) === "/"
   }
 
   for (var i = 0; i < lines.length; i++) {
@@ -32,26 +50,34 @@ function parseRows(raw) {
     var fields = line.split("\t")
     var kind = fields[0]
 
-    if (kind === "meta") {
-      if (fields[1] === "current-theme") currentTheme = fields.slice(2).join("\t")
-      else if (fields[1] === "current-background") currentBackground = fields.slice(2).join("\t")
+    if (kind === "meta" && fields.length === 3) {
+      if (fields[1] === "current-theme" && validField(fields[2])) currentTheme = fields[2]
+      else if (fields[1] === "current-background" && (!fields[2] || validPath(fields[2]))) currentBackground = fields[2]
       continue
     }
 
-    if (kind === "theme" && fields[1]) {
-      ensureTheme(fields[1], fields[2], fields[3], fields[4] || "")
+    if (kind === "theme" && fields.length === 5 && validField(fields[2])
+        && (!fields[4] || validPath(fields[4]))) {
+      ensureTheme(fields[1], fields[2], fields[3], fields[4])
       continue
     }
 
-    if (kind === "background" && fields[1] && fields[2]) {
+    if (kind === "background" && fields.length === 5 && validPath(fields[2])
+        && (!fields[3] || validPath(fields[3])) && validField(fields[4])
+        && backgroundTotal < maximumBackgroundsTotal) {
       var theme = ensureTheme(fields[1])
+      if (!theme || !Array.isArray(theme.backgrounds)
+          || theme.backgrounds.length >= maximumBackgroundsPerTheme) continue
       var backgroundPath = fields[2]
       var thumbnailPath = fields[3] || ""
+      if (indexOfPath(theme.backgrounds, backgroundPath) !== -1) continue
       theme.backgrounds.push({
         path: backgroundPath,
         thumbnail: thumbnailPath,
+        fingerprint: fields[4],
         name: backgroundPath.split("/").pop()
       })
+      backgroundTotal += 1
     }
   }
 
