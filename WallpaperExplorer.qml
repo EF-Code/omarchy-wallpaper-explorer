@@ -46,7 +46,8 @@ Item {
   readonly property var filteredThemes: Model.filterThemes(root.themes, root.searchText)
   readonly property string pluginId: "io.github.ef-code.wallpaper-explorer"
   readonly property string pluginDirectory: root.manifest && root.manifest.__sourceDir
-    ? String(root.manifest.__sourceDir) : ""
+    ? String(root.manifest.__sourceDir)
+    : Quickshell.env("HOME") + "/.config/omarchy/plugins/" + root.pluginId
   readonly property string discoveryScript: root.pluginDirectory + "/discover.sh"
   readonly property string applyScript: root.pluginDirectory + "/apply.sh"
 
@@ -56,6 +57,7 @@ Item {
   property color surfaceRaised: Qt.alpha(root.foreground, 0.06)
   property color accent: Color.accent
   property color scrim: Qt.rgba(0, 0, 0, 0.78)
+
 
   function imageSource(path) {
     return path ? Util.fileUrl(path) : ""
